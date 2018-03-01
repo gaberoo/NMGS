@@ -27,25 +27,27 @@
 /*User includes*/
 #include "NMGS.h"
 
-static char *usage[] = {"NMGS - Fits multisite HDP neutral model to a matrix of abundances\n",
-                        "Required parameters:\n",
-			"\t-in\tfilename\tcsv file\n",
-			"\t-out\toutfilestub\n",
-                        "Optional:\n",	
-			"\t-b\tinteger\tnumber of burn iterations\n",
-			"\t-e\tinteger\textrapolate size\n",
-			"\t-l\tinteger\tseed\n",
-			"\t-o\t\toutput samples\n",
-			"\t-s\t\tbootstrap for neutral fit\n",
-			"\t-t\tintger\tnumber of iterations\n",
-			"\t-v\t\tverbose\n"};
+static char *usage[] = {
+  "NMGS - Fits multisite HDP neutral model to a matrix of abundances\n",
+  "Required parameters:\n",
+	"\t-in\tfilename\tcsv file\n",
+	"\t-out\toutfilestub\n",
+  "Optional:\n",	
+	"\t-b\tinteger\tnumber of burn iterations\n",
+	"\t-e\tinteger\textrapolate size\n",
+	"\t-l\tinteger\tseed\n",
+	"\t-o\t\toutput samples\n",
+	"\t-s\t\tbootstrap for neutral fit\n",
+	"\t-S\t\tskip Gibbs sampling (read theta from file)\n",
+	"\t-t\tintger\tnumber of iterations\n",
+	"\t-v\t\tverbose\n"
+};
 
 static int nLines   = 13;
 
 static int bVerbose = FALSE;
 
-int main(int argc, char* argv[])
-{
+int main(int argc, char* argv[]) {
   int  ii = 0, i = 0, j = 0, jj = 0, k = 0, nN = 0, nS = 0;
   int nMaxX = 0, nIter = 0, nMaxIter = 0;
   t_Params tParams;
@@ -60,36 +62,40 @@ int main(int argc, char* argv[])
   int                *anTC = NULL,*anTR = NULL, **aanT = NULL, **aanX = NULL, *anJ = NULL;
   double             dLogNormalisation = 0.0, dTheta = 0.0;
   char*              szSampleDir = (char *) malloc(MAX_LINE_LENGTH*sizeof(char));
-  /*initialise GSL RNG*/
-  gsl_rng_env_setup();
 
+  /* initialise GSL RNG */
+  gsl_rng_env_setup();
   gsl_set_error_handler_off();
-  
   ptGSLRNGType = gsl_rng_default;
   ptGSLRNG     = gsl_rng_alloc(ptGSLRNGType);
-
   gsl_set_error_handler_off();
   
-  /*get command line params*/
+  /* get command line params */
   getCommandLineParams(&tParams, argc, argv);
   nMaxIter = tParams.nMaxIter;
-  /*set RNG seed*/
+  if (bVerbose) { printf("Max iter = %d\n",nMaxIter); }
+
+  /* set RNG seed */
   gsl_rng_set (ptGSLRNG, tParams.nL);
   	
-  /*read in abundance distribution*/
+  /* read in abundance distribution */
+  if (bVerbose) fprintf(stderr,"Reading abundance data...");
   readAbundanceData(tParams.szInputFile,&tData);
+  if (bVerbose) fprintf(stderr,"done.\n");
   
   nS = tData.nS;
   nN = tData.nN;
 
   nMaxX = maxX(&tData);
 
-  if(tParams.nRarefy != -1){
+  if (tParams.nRarefy != -1) {
+    if (bVerbose) fprintf(stderr,"Rarifying data...");
+
     int nMinJ = minJ(&tData);
     t_Data tRData;
     char szRFile[MAX_LINE_LENGTH];
     
-    if(bVerbose){
+    if (bVerbose) {
       printf("Rarefy to %d:\n",nMinJ);
       fflush(stderr);
     }
@@ -111,342 +117,275 @@ int main(int argc, char* argv[])
     tData.aszOTUNames = tRData.aszOTUNames;
 
     nS = tRData.nS;
+
+    if (bVerbose) fprintf(stderr,"done.\n");
   }
 	
+  /**************************************************************************/
+
+  if (bVerbose) fprintf(stderr,"Allocating memory...");
+
   aanT = (int **) malloc(nN*sizeof(int*));
-  if(!aanT)
-    goto memoryError;
+  if (!aanT) goto memoryError;
 	
   anJ = (int *) malloc(nN*sizeof(int));
-  if(!anJ)
-    goto memoryError;
-	
+  if (!anJ) goto memoryError;
 
   adJ = (double *) malloc(nN*sizeof(double));
-  if(!adJ)
-    goto memoryError;
+  if (!adJ) goto memoryError;
+
+  if (bVerbose) fprintf(stderr,"\n");
 
   aanX = tData.aanX;
-  for(i = 0; i < nN; i++){
+  for (i = 0; i < nN; i++) {
+    if (bVerbose) fprintf(stderr,"*");
     anJ[i] = 0;
 
     aanT[i] = (int *) malloc(nS*sizeof(int));
-    if(!aanT[i])
-      goto memoryError;
+    if (!aanT[i]) goto memoryError;
 
-    for(j = 0; j < nS; j++){
+    for (j = 0; j < nS; j++) {
       anJ[i] += aanX[i][j];
-      /*initialise with one ancestor if species present*/
-      if(aanX[i][j] > 0){
-	aanT[i][j] = 1;
-      }
-      else{
-	aanT[i][j] = 0;
-      }
-      
+
+      /* initialise with one ancestor if species present */
+      if(aanX[i][j] > 0) aanT[i][j] = 1;
+      else aanT[i][j] = 0;
     }
     adJ[i] = (double) anJ[i];
-    
   }
+  if (bVerbose) fprintf(stderr,"\n");
 	
+  if (bVerbose) fprintf(stderr,"Generating Stirling matrix...");
   //generateStirlingDMatrix(aadStirlingMatrix, nMaxX);
   Stirling(&aadStirlingMatrix,&adLogNormalisation,nMaxX);
+  if (bVerbose) fprintf(stderr,"done.\n");
 	
   adStirlingVector = (double *) malloc((nMaxX + 1)*sizeof(double));
-  if(!adStirlingVector)
-    goto memoryError;
+  if (!adStirlingVector) goto memoryError;
 
   adLogProbV = (double *) malloc((nMaxX + 1)*sizeof(double));
-  if(!adLogProbV)
-    goto memoryError;
+  if (!adLogProbV) goto memoryError;
 
   adLogProbAdjustV = (double *) malloc((nMaxX + 1)*sizeof(double));
-  if(!adLogProbAdjustV)
-    goto memoryError;
+  if (!adLogProbAdjustV) goto memoryError;
 
   adProbV = (double *) malloc((nMaxX + 1)*sizeof(double));
-  if(!adProbV)
-    goto memoryError;
+  if (!adProbV) goto memoryError;
 
   adCProbV = (double *) malloc((nMaxX + 1)*sizeof(double));
-  if(!adCProbV)
-    goto memoryError;
+  if (!adCProbV) goto memoryError;
 
   adM = (double *) malloc((nS + 1)*sizeof(double));
-  if(!adM)
-    goto memoryError;
+  if (!adM) goto memoryError;
 
   aadMStore = (double **) malloc(nMaxIter*sizeof(double*));
-  if(!aadMStore)
-    goto memoryError;
+  if (!aadMStore) goto memoryError;
 
   aadIStore = (double **) malloc(nMaxIter*sizeof(double*));
-  if(!aadIStore)
-    goto memoryError;
+  if (!aadIStore) goto memoryError;
 
   adThetaStore = (double *) malloc(nMaxIter*sizeof(double));
-  if(!adThetaStore)
-    goto memoryError;
+  if (!adThetaStore) goto memoryError;
 
   aanTStore = (int **) malloc(nMaxIter*sizeof(int*));
-  if(!aanTStore)
-    goto memoryError;
+  if (!aanTStore) goto memoryError;
 
-  for(i = 0; i < nMaxIter; i++){
+  for (i = 0; i < nMaxIter; i++) {
     aanTStore[i] = (int *) malloc(nS*sizeof(int));
-    if(!aanTStore[i])
-      goto memoryError;
+    if (!aanTStore[i]) goto memoryError;
 
     aadMStore[i] = (double *) malloc((nS + 1)*sizeof(double));
-    if(!aadMStore[i])
-      goto memoryError;
+    if (!aadMStore[i]) goto memoryError;
 
     aadIStore[i] = (double *) malloc(nN*sizeof(double));
-    if(!aadIStore[i])
-      goto memoryError;
+    if (!aadIStore[i]) goto memoryError;
   }
 	
-
   anTC = (int *) malloc(nS*sizeof(int));
-  if(!anTC)
-    goto memoryError;
+  if (!anTC) goto memoryError;
 
   anTR = (int *) malloc(nN*sizeof(int));
-  if(!anTR)
-    goto memoryError;
+  if (!anTR) goto memoryError;
 
   adW = (double *) malloc(nN*sizeof(double));
-  if(!adW)
-    goto memoryError;
+  if (!adW) goto memoryError;
 
   adS = (double *) malloc(nN*sizeof(double));
-  if(!adS)
-    goto memoryError;
+  if (!adS) goto memoryError;
 
-  while(nIter < nMaxIter){
-    sumColumns(anTC, aanT, nN, nS);
-    sumRows(anTR, aanT, nN, nS);
-
-    /*set current theta*/
-    if(nIter > 0){
-      dTheta = adThetaStore[nIter - 1]; 
-    }
-    else{
-      dTheta = THETA_INIT;
-    }
-	
-    /*sample metacommunity*/    
-    sampleMetacommunity(nIter, ptGSLRNG, adM, aadMStore, dTheta, nS, anTC);
-    
-    sampleImmigrationRates(nIter, ptGSLRNG, aadIStore, nN, adW, adS, adJ, anTR);
-    
-    adThetaStore[nIter] = sampleTheta(ptGSLRNG, dTheta, anTR, nN, nS);
-
-    sampleT(nIter, ptGSLRNG, aanX, aanT, aadIStore, aadMStore, aadStirlingMatrix, nN, nS, adLogProbV, adProbV, adCProbV);
-
-    for(i = 0; i < nS; i++){
-      aanTStore[nIter][i] = anTC[i];
-    }
-
-    if(bVerbose == TRUE){
-      printf("Iteration:%d\n",nIter + 1);
-      printf("Theta:%f\n",adThetaStore[nIter]);
-      printf("Immigration vector:");
-      for(i = 0; i < nN; i++){
-	printf("%f ",aadIStore[nIter][i]);
-      }
-      printf("\n");
-    }
-
-    nIter++;
-
+  if (bVerbose) {
+    fprintf(stderr,"done.\n");
+    fflush(stderr);
   }
 
-  if(1){
-    FILE *ofp = NULL;
-    char szOutFile[MAX_LINE_LENGTH];
+  /**************************************************************************/
 
-    sprintf(szOutFile,"%s%s",tParams.szOutFileStub,CSV_FILE_SUFFIX);
-  
-    ofp = fopen(szOutFile, "w");
-
-    if(ofp){
-      for(i = 0; i < nMaxIter; i++){
-	fprintf(ofp,"%d,%f,",i,adThetaStore[i]);
-	
-	for(j = 0; j < nN - 1; j++){
-	  fprintf(ofp,"%f,",aadIStore[i][j]);
-	}
-
-	fprintf(ofp,"%f\n",aadIStore[i][nN - 1]);
-      }
-      
-      fclose(ofp);
-    }
-    else{
-      fprintf(stderr, "Failed to open %s for writing\n",szOutFile);
+  if (tParams.bSampleOnly) {
+    if (bVerbose) {
+      fprintf(stderr,"Reading theta from file...");
       fflush(stderr);
     }
+
+    /* read theta values from the file */
+    readTheta(&tParams,nMaxIter,nN,adThetaStore,aadIStore);
+
+    if (bVerbose) fprintf(stderr,"done.\n");
+  } else {
+
+    /* run Gibbs sampler for nMaxIter iterations */
+    while (nIter < nMaxIter) {
+      sumColumns(anTC, aanT, nN, nS);
+      sumRows(anTR, aanT, nN, nS);
+
+      /* set current theta */
+      if (nIter > 0) dTheta = adThetaStore[nIter-1]; 
+      else dTheta = THETA_INIT;
+    
+      /* sample metacommunity */
+      sampleMetacommunity(nIter, ptGSLRNG, adM, aadMStore, dTheta, nS, anTC);
+      
+      sampleImmigrationRates(nIter, ptGSLRNG, aadIStore, nN, adW, adS, adJ, anTR);
+      
+      adThetaStore[nIter] = sampleTheta(ptGSLRNG, dTheta, anTR, nN, nS);
+
+      sampleT(nIter, ptGSLRNG, aanX, aanT, aadIStore, aadMStore,
+              aadStirlingMatrix, nN, nS, adLogProbV, adProbV, adCProbV);
+
+      for (i = 0; i < nS; i++) aanTStore[nIter][i] = anTC[i];
+
+      if (bVerbose) {
+        printf("%6.2f%% | it = %d | theta = %f\r",100.0*nIter/nMaxIter,nIter+1,adThetaStore[nIter]);
+        fflush(stdout);
+      }
+
+      nIter++;
+    }
+
+    if (bVerbose) { printf("\n"); fflush(stdout); }
+
+    /* write all sampled theta to output file */
+    writeTheta(&tParams,nMaxIter,nN,adThetaStore,aadIStore);
   }
 
-  if(tParams.bOutputSample){
+  if (tParams.bOutputSample) {
     sprintf(szSampleDir,"%s%s",tParams.szOutFileStub,SAMPLE_DIR);
-
     mkdir(szSampleDir, S_IRWXU);
   }
 
-  if(tParams.nExtrapolate > -1){
+  if (tParams.nExtrapolate > -1) {
     //  extrapolateSamples(nIter, nMaxIter, ptGSLRNG, nN, nS, &tParams, &tData,
     //	       adThetaStore, anJ, aadIStore, aadMStore);
-    extrapolateSamples2(szSampleDir,nIter, nMaxIter, ptGSLRNG, tParams.nExtrapolate, nN, nS, &tParams, &tData,
-			 adThetaStore, anJ, aadIStore, aanTStore);
+    extrapolateSamples2(szSampleDir,nIter, nMaxIter, ptGSLRNG, 
+                        tParams.nExtrapolate, nN, nS, &tParams, &tData,
+                        adThetaStore, anJ, aadIStore, aanTStore);
   }
 
-  if(tParams.bSample){
-    printf("Sampling fit...\n");
-
-    outputSamples(szSampleDir,nIter, nMaxIter, ptGSLRNG, nN, nS, &tParams, &tData, adThetaStore, anJ, aadIStore, aadMStore);
+  /* sampling the metacommunities from the fit */
+  if (tParams.bSample) {
+    if (bVerbose) fprintf(stderr,"Sampling fit...\n");
+    outputSamples(szSampleDir, nIter, nMaxIter, ptGSLRNG, nN, nS, 
+                  &tParams, &tData, adThetaStore, anJ, aadIStore, aadMStore);
   }
-  /*free up memory*/
-  free(adW);
-  adW = NULL;
 
-  free(adS);
-  adS = NULL;
-	
-  free(anJ);
-  anJ = NULL;
+  /**************************************************************************/
+  /* free up memory */
 
-  free(adJ);
-  adJ = NULL;
+  free(adW); adW = NULL;
+  free(adS); adS = NULL;
+  free(anJ); anJ = NULL;
+  free(adJ); adJ = NULL;
 
-  for(i = 0; i < nMaxIter; i++){
-    free(aadMStore[i]);
-    aadMStore[i] = NULL;
-    free(aadIStore[i]);
-    aadIStore[i] = NULL;
-    free(aanTStore[i]);
-    aanTStore[i] = NULL;
+  for (i = 0; i < nMaxIter; i++) {
+    free(aadMStore[i]); aadMStore[i] = NULL;
+    free(aadIStore[i]); aadIStore[i] = NULL;
+    free(aanTStore[i]); aanTStore[i] = NULL;
   }
-  free(aanTStore);
-  aanTStore = NULL;
 
-  free(aadMStore);
-  aadMStore = NULL;
-  
-  free(aadIStore);
-  aadIStore = NULL;
-
-  free(adM);
-  adM = NULL;
-  
-  free(anTC); free(anTR);
-  anTC = NULL; anTR = NULL;
+  free(aanTStore); aanTStore = NULL;
+  free(aadMStore); aadMStore = NULL;
+  free(aadIStore); aadIStore = NULL;
+  free(adM); adM = NULL;
+  free(anTC); anTC = NULL;
+  free(anTR); anTR = NULL;
   
   for(i = 0; i < nMaxX + 1; i++){
     free(aadStirlingMatrix[i]);
     aadStirlingMatrix[i] = NULL;
   }
-  free(aadStirlingMatrix);
-  aadStirlingMatrix = NULL;
 
-  free(adStirlingVector);
-  adStirlingVector = NULL;
+  free(aadStirlingMatrix); aadStirlingMatrix = NULL;
+  free(adStirlingVector); adStirlingVector = NULL;
+  free(adLogProbV); adLogProbV = NULL;
+  free(adLogProbAdjustV); adLogProbAdjustV = NULL;
+  free(adProbV); adProbV = NULL;
+  free(adCProbV); adCProbV = NULL;
+  free(adLogNormalisation); adLogNormalisation = NULL;
+  free(adThetaStore); adThetaStore = NULL;
+  free(szSampleDir); szSampleDir = NULL;
 
-  free(adLogProbV);
-  adLogProbV = NULL;
+  for(i = 0; i < nN; i++) { free(aanT[i]); aanT[i] = NULL; }
 
-  free(adLogProbAdjustV);
-  adLogProbAdjustV = NULL;
+  free(aanT); aanT = NULL;
 
-  free(adProbV);
-  adProbV = NULL;
+  for(i = 0; i < nN; i++) { free(tData.aanX[i]); }
 
-  free(adCProbV);
-  adCProbV = NULL;
-
-  free(adLogNormalisation);
-  adLogNormalisation = NULL;
-
-  free(adThetaStore);
-  adThetaStore = NULL;
-
-  free(szSampleDir);						   
-  szSampleDir = NULL;
-  
-  for(i = 0; i < nN; i++){
-    free(aanT[i]);
-    aanT[i] = NULL;
-  }
-  free(aanT);
-  aanT = NULL;
-
-  for(i = 0; i < nN; i++){
-    free(tData.aanX[i]);
-  }
   free(tData.aanX);
 
   exit(EXIT_SUCCESS);
 
- memoryError:
+memoryError:
   fprintf(stderr, "Failed allocating memory in main\n");
   fflush(stderr);
   exit(EXIT_FAILURE);
 }
 
-void writeUsage(FILE* ofp)
-{
+/****************************************************************************/
+
+void writeUsage(FILE* ofp) {
   int i = 0;
   char *line;
 
-  for(i = 0; i < nLines; i++){
+  for(i = 0; i < nLines; i++) {
     line = usage[i];
     fputs(line,ofp);
   }
 }
 
-char *extractParameter(int argc, char **argv, char *param,int when)
-{
+/****************************************************************************/
+
+char *extractParameter(int argc, char **argv, char *param, int when) {
   int i = 0;
 
-  while((i < argc) && (strcmp(param,argv[i]))){
-    i++;
-  }
+  while ((i < argc) && (strcmp(param,argv[i]))) i++;
 
-  if(i < argc - 1){
-    return(argv[i + 1]);
-  }
+  if (i < argc - 1) return(argv[i + 1]);
 
-  if((i == argc - 1) && (when == OPTION)){
-    return "";
-  }
+  if ((i == argc - 1) && (when == OPTION)) return "";
 
-  if(when == ALWAYS){
+  if (when == ALWAYS) {
     fprintf(stdout,"Can't find asked option %s\n",param);
   }
 
   return (char *) NULL;
 }
 
+/****************************************************************************/
+
 void getCommandLineParams(t_Params *ptParams,int argc,char *argv[])
 {
   char *szTemp = NULL;
   char *cError = NULL;
 
-  /*get parameter file name*/
-  ptParams->szInputFile  = extractParameter(argc,argv, INPUT_FILE,ALWAYS);  
-  if(ptParams->szInputFile == NULL)
-    goto error;
+  /* get parameter file name */
+  ptParams->szInputFile  = extractParameter(argc,argv,INPUT_FILE,ALWAYS);  
+  if (ptParams->szInputFile == NULL) goto error;
  
   /*get parameter file name*/
   ptParams->szOutFileStub  = extractParameter(argc,argv,OUT_FILE_STUB,ALWAYS);  
-  if(ptParams->szOutFileStub == NULL)
-    goto error;
+  if (ptParams->szOutFileStub == NULL) goto error;
 
   szTemp = extractParameter(argc,argv,VERBOSE,OPTION);
-  if(szTemp != NULL){
-    bVerbose=TRUE;
-  }
+  if (szTemp != NULL) bVerbose = TRUE;
 
   szTemp = extractParameter(argc,argv,N_BURN_ITER,OPTION);
   if(szTemp != NULL){
@@ -479,80 +418,68 @@ void getCommandLineParams(t_Params *ptParams,int argc,char *argv[])
   }
 
   szTemp = extractParameter(argc,argv,SAMPLE,OPTION);
-  if(szTemp != NULL){
-    ptParams->bSample=TRUE;
-  }
-  else{
-    ptParams->bSample=FALSE;
-  }
+  if (szTemp != NULL) { ptParams->bSample=TRUE; }
+  else { ptParams->bSample=FALSE; }
+
+  szTemp = extractParameter(argc,argv,SAMPLE_ONLY,OPTION);
+  if (szTemp != NULL) { ptParams->bSampleOnly = TRUE; }
+  else { ptParams->bSampleOnly= FALSE; }
 
   szTemp = extractParameter(argc,argv,SEED,OPTION);
-  if(szTemp != NULL){
+  if (szTemp != NULL) {
     ptParams->nL = strtol(szTemp,&cError,10);
-    if(*cError != '\0'){
-      goto error;
-    }
-  }
-  else{
+    if (*cError != '\0') { goto error; }
+  } else {
     ptParams->nL = 1;
   }
 
   szTemp = extractParameter(argc,argv,EXTRAPOLATE,OPTION);
-  if(szTemp != NULL){
+  if (szTemp != NULL) {
     ptParams->nExtrapolate = strtol(szTemp,&cError,10);
-    if(*cError != '\0'){
-      goto error;
-    }
-  }
-  else{
+    if (*cError != '\0') { goto error; }
+  } else {
     ptParams->nExtrapolate = -1;
   }
 
-
   szTemp = extractParameter(argc,argv,N_ITERATIONS,OPTION);
-  if(szTemp != NULL){
+  if (szTemp != NULL) {
     ptParams->nMaxIter = strtol(szTemp,&cError,10);
-    if(*cError != '\0'){
-      goto error;
-    }
+    if (*cError != '\0') { goto error; }
   }
-  else{
-    ptParams->nMaxIter = DEF_MAX_ITER;
-  }
+  else { ptParams->nMaxIter = DEF_MAX_ITER; }
 
   return;
 
- error:
+error:
   writeUsage(stdout);
   exit(EXIT_FAILURE);
 }
 
-void writeAbundanceData(const char *szFile, t_Data *ptData)
-{
+/****************************************************************************/
+
+void writeAbundanceData(const char *szFile, t_Data *ptData) {
   FILE* ofp = fopen(szFile,"w");
   int i = 0, j = 0;
   int nS = ptData->nS, nN = ptData->nN;
 
-  if(ofp){
+  if (ofp) {
     fprintf(ofp,"OTUs,");
     
-    for(j = 0; j < nN - 1; j++){
+    for (j = 0; j < nN - 1; j++) {
       fprintf(ofp,"%s,",ptData->aszSampleNames[j]);
     }
     fprintf(ofp,"%s\n",ptData->aszSampleNames[j]);
 
-    for(i = 0; i < nS; i++){
+    for (i = 0; i < nS; i++) {
       fprintf(ofp,"%s,",ptData->aszOTUNames[i]);
-
-      for(j = 0; j < nN - 1; j++){
-	fprintf(ofp,"%d,",ptData->aanX[j][i]);
+      for (j = 0; j < nN - 1; j++) {
+        fprintf(ofp,"%d,",ptData->aanX[j][i]);
       }
       fprintf(ofp,"%d\n",ptData->aanX[nN - 1][i]);
     }
 
     fclose(ofp);
-  }
-  else{
+  } else {
     fprintf(stderr,"Failed writing abundance data to file %s\n",szFile);
     fflush(stderr);
   }
@@ -567,24 +494,29 @@ void readAbundanceData(const char *szFile, t_Data *ptData)
 
   ifp = fopen(szFile, "r");
 
-  if(ifp){
+  if (ifp) {
     char* szTok   = NULL;
     char* pcError = NULL;
 
+    /* get line */
     fgets(szLine, MAX_LINE_LENGTH, ifp);
+
+    /* split line into tokens */
     szTok = strtok(szLine, DELIM);
 
-    while(strtok(NULL, DELIM) != NULL){
-      
-      nN++;
-    }
+    /* count number of samples in the first line */
+    while (strtok(NULL, DELIM) != NULL) nN++;
 
-    while(fgets(szLine, MAX_LINE_LENGTH, ifp) != NULL){
-    	nS++;
-    }
+    /* get number of species */
+    while (fgets(szLine, MAX_LINE_LENGTH, ifp) != NULL) nS++;
+
+    /* close input file (will reopen) */
     fclose(ifp);
 
+    /* reopen input file */
     ifp = fopen(szFile, "r");	
+    
+    /* get the first line */
     fgets(szLine, MAX_LINE_LENGTH, ifp);
 
     ptData->aszSampleNames = (char **) malloc(nN*sizeof(char*));
@@ -634,53 +566,51 @@ void readAbundanceData(const char *szFile, t_Data *ptData)
   exit(EXIT_FAILURE);
 }
 
-int compare_doubles(const void* a, const void* b) 
-{
-  double* arg1 = (double *) a;
-  double* arg2 = (double *) b;
-  if( *arg1 < *arg2 ) return -1;
-  else if( *arg1 == *arg2 ) return 0;
-  else return 1;
-}       
+/****************************************************************************/
 
-void Stirling(double ***paadStirlingMatrix,double** padNormMatrix,unsigned long n){
-  double **aadStirlingMatrix = NULL, *adNormMatrix = NULL;
+int compare_doubles(const void* a, const void* b) {
+  double* arg1 = (double*) a;
+  double* arg2 = (double*) b;
+  if (*arg1 < *arg2) return -1;
+  else if (*arg1 == *arg2) return 0;
+  else return 1;
+}
+
+/****************************************************************************/
+
+void Stirling(double ***paadStirlingMatrix, double** padNormMatrix,
+              unsigned long n)
+{
+  double **aadStirlingMatrix = NULL;
+  double *adNormMatrix = NULL;
+
   unsigned long nN2 = n + 2, nN1 = n + 1;
-  double *adS=(double *) malloc(nN2*sizeof(double));
-  double *adL=(double *) malloc(nN2*sizeof(double));
+
+  double *adS = (double*) malloc(nN2*sizeof(double));
+  double *adL = (double*) malloc(nN2*sizeof(double));
+
   double dMaxVal = 0.0;
   unsigned long i = 0, k = 0, j = 0;
 
-  aadStirlingMatrix = (double **) malloc(nN1*sizeof(double*));
-  if(!aadStirlingMatrix)
-    goto memoryError;
+  aadStirlingMatrix = (double**) malloc(nN1*sizeof(double*));
+  if (!aadStirlingMatrix) goto memoryError;
 
-  for(i = 0; i < nN2; i++){
+  for (i = 0; i < nN2; i++) {
     adS[i] = 0.0;
     adL[i] = 0.0;
   }
 
-  for(i = 0; i < nN1; i++){
-    aadStirlingMatrix[i] = (double *) malloc((i+1)*sizeof(double));
-    
-    if(!aadStirlingMatrix[i])
-      goto memoryError;
-    
-    for(j = 0; j < i + 1; j++){
-        aadStirlingMatrix[i][j] = 0.0;
-    }
-
+  for (i = 0; i < nN1; i++) {
+    aadStirlingMatrix[i] = (double*) malloc((i+1)*sizeof(double));
+    if (! aadStirlingMatrix[i]) goto memoryError;
+    for (j = 0; j < i+1; j++) aadStirlingMatrix[i][j] = 0.0;
   }
 
   adNormMatrix = (double *) malloc(nN1*sizeof(double));
-  if(!adNormMatrix)
-    goto memoryError;
+  if (!adNormMatrix) goto memoryError;
 
-  if(!adS)
-    goto memoryError;
-  
-  if(!adL)
-    goto memoryError;
+  if (!adS) goto memoryError;
+  if (!adL) goto memoryError;
 
   adS[1] = 1.0;
   adL[1] = 0.0;
@@ -688,28 +618,29 @@ void Stirling(double ***paadStirlingMatrix,double** padNormMatrix,unsigned long 
   aadStirlingMatrix[0][0] = 1.0;
   adNormMatrix[0] = 0.0;
 
-  for(k = 2; k < nN1; k++){
+  fprintf(stderr,"\n");
+  for (k = 2; k < nN1; k++) {
+    fprintf(stderr,"%lu/%lu\r",k,nN1);
+
     adL[k]  = 0;
     dMaxVal = 0.0;
-        	
-    for(j = k; j > 0;--j)
-      adS[j]=adS[j-1]+(k-1)*adS[j];
-        	
-    for(j = 1;j <= k;j++)
-      if(adS[j] > dMaxVal)
-	dMaxVal=adS[j];
-       	 	
-    for(j = 1; j <= k;j++)
-      adS[j]/=dMaxVal;
 
-    adL[k] = adL[k-1]+ log(dMaxVal);
-        
-    for(j=1;j<=k;j++){
-      aadStirlingMatrix[k-1][j-1]=adS[j];
-      adNormMatrix[k-1]=adL[k];
+    for (j = k; j > 0; --j) adS[j] = adS[j-1] + (k-1)*adS[j];
+        	
+    for (j = 1; j <= k; j++) {
+      if (adS[j] > dMaxVal) dMaxVal = adS[j];
     }
+       	 	
+    for(j = 1; j <= k; j++) adS[j] /= dMaxVal;
 
+    adL[k] = adL[k-1] + log(dMaxVal);
+        
+    for (j = 1; j<=k; j++) {
+      aadStirlingMatrix[k-1][j-1] = adS[j];
+      adNormMatrix[k-1] = adL[k];
+    }
   }
+  fprintf(stderr,"\n");
 
   (*paadStirlingMatrix) = aadStirlingMatrix;
   (*padNormMatrix) = adNormMatrix;
@@ -719,7 +650,7 @@ void Stirling(double ***paadStirlingMatrix,double** padNormMatrix,unsigned long 
 
   return;
 
- memoryError:
+memoryError:
   fprintf(stderr, "Failed allocating memory in main\n");
   fflush(stderr);
   exit(EXIT_FAILURE);
@@ -765,13 +696,12 @@ void generateStirlingDMatrix(double **aadStirling, unsigned long lK)
   }
 }
 
-int maxX(t_Data *ptData)
-{
+int maxX(t_Data *ptData) {
 	int i = 0, j = 0, nMax = 0, nS = ptData->nS, nN = ptData->nN;
 
-	for(i = 0; i < nN; i++){
-		for(j = 0; j < nS; j++){
-			if(ptData->aanX[i][j] > nMax){
+	for (i = 0; i < nN; i++) {
+		for (j = 0; j < nS; j++) {
+			if (ptData->aanX[i][j] > nMax) {
 				nMax = ptData->aanX[i][j];
 			}
 		}
@@ -780,38 +710,37 @@ int maxX(t_Data *ptData)
 	return nMax;
 }
 
-int minJ(t_Data *ptData)
-{
+/****************************************************************************/
+
+int minJ(t_Data *ptData) {
   int i = 0, j = 0, nMin = 1e9, nS = ptData->nS, nN = ptData->nN;
 
-  for(i = 0; i < nN; i++){
+  for(i = 0; i < nN; i++) {
     int nTotal = 0;
 
-    for(j = 0; j < nS; j++){
+    for (j = 0; j < nS; j++) {
       nTotal += ptData->aanX[i][j];
     }
 
-    if(nTotal < nMin){
-      nMin = nTotal;
-    }
+    if (nTotal < nMin) nMin = nTotal;
   }
   return nMin;
 }
 
-void sumColumns(int *anC, int **aanX, int nN, int nS)
-{
+/****************************************************************************/
+
+void sumColumns(int *anC, int **aanX, int nN, int nS) {
 	int i = 0, j = 0;
 
-	for(j = 0; j < nS; j++){
+	for (j = 0; j < nS; j++) {
 		anC[j] = 0;
-		for(i = 0; i < nN; i++){
-			anC[j] += aanX[i][j];
-		}
+		for (i = 0; i < nN; i++) anC[j] += aanX[i][j];
 	}
 }
 
-void sumRows(int *anR, int **aanX, int nN, int nS)
-{
+/****************************************************************************/
+
+void sumRows(int *anR, int **aanX, int nN, int nS) {
 	int i = 0, j = 0;
 
 	for(i = 0; i < nN; i++){
@@ -924,17 +853,18 @@ int selectIntCat(gsl_rng* ptGSLRNG, int nN, int* anN)
   exit(EXIT_FAILURE);
 }
 
+/****************************************************************************/
+
 void addUnobserved(t_Data* ptDataR, t_Data *ptData)
 {
-  int    i = 0, j = 0;
-  int    nN = ptData->nN, nS = ptData->nS;
-  int    **aanX = (int **) malloc(nN*sizeof(int*));
-  int    nSDash = nS + 1;
+  int i = 0, j = 0;
+  int nN = ptData->nN, nS = ptData->nS;
+  int **aanX = (int**) malloc(nN*sizeof(int*));
+  int nSDash = nS+1;
 
-  if(!aanX)
-    goto memoryError;
+  if (!aanX) goto memoryError;
 
-  for(i = 0; i < nN; i++){
+  for (i = 0; i < nN; i++) {
     aanX[i] = (int *) malloc(nSDash*sizeof(int));
 
     if(!aanX[i])
@@ -952,11 +882,13 @@ void addUnobserved(t_Data* ptDataR, t_Data *ptData)
 
   return;
 
- memoryError:
+memoryError:
   fprintf(stderr,"Failed allocating memory in generateData\n");
   fflush(stderr);
   exit(EXIT_FAILURE);
 }
+
+/****************************************************************************/
 
 void copyData(t_Data* ptDataR, t_Data *ptData)
 {
@@ -1161,85 +1093,76 @@ void extrapolateDataHDP(gsl_rng* ptGSLRNG, t_Data *ptData, int nN, int nE, doubl
   exit(EXIT_FAILURE);
 }
 
+/****************************************************************************/
 
-void generateDataHDP(gsl_rng* ptGSLRNG, t_Data *ptData, int nN, double dTheta, int *anJ, double* adI,int** panT)
+void generateDataHDP(gsl_rng* ptGSLRNG, t_Data *ptData, int nN, 
+                     double dTheta, int *anJ, double* adI,int** panT)
 {
   int    i = 0, j = 0, k = 0, n = 0;
   int    *anT = NULL, nT = 0;
 
   ptData->aanX = (int **) malloc(nN*sizeof(int*));
-  if(!ptData->aanX)
-    goto memoryError;
+  if (!ptData->aanX) goto memoryError;
 
   ptData->nSize = INIT_SIZE;
   ptData->nS = 0;
   ptData->nN = nN;
 
   anT = (int *) malloc(ptData->nSize*sizeof(int));
-  if(!anT)
-    goto memoryError;
+  if (!anT) goto memoryError;
 
-  for(i = 0; i < ptData->nSize; i++){
-    anT[i] = 0;
-  }
+  for (i = 0; i < ptData->nSize; i++) anT[i] = 0;
 
-  for(i = 0; i < nN; i++){
+  for (i = 0; i < nN; i++) {
     ptData->aanX[i] = (int *) malloc(ptData->nSize*sizeof(int));
 
-    if(!ptData->aanX[i])
-      goto memoryError;
+    if (!ptData->aanX[i]) goto memoryError;
 
-    for(j = 0; j < ptData->nSize; j++){
-      ptData->aanX[i][j] = 0;
-    }
+    for (j = 0; j < ptData->nSize; j++) ptData->aanX[i][j] = 0;
   }
 
-  for(i = 0; i < nN; i++){
-    for(n = 0; n < anJ[i]; n++){
+  for (i = 0; i < nN; i++) {
+    for (n = 0; n < anJ[i]; n++) {
       double dImmigrate = adI[i]/(adI[i] + (double) n);
       double dRand = gsl_rng_uniform(ptGSLRNG);
       int    l = -1;
 
-      if(dRand < dImmigrate){
-	double dSpeciate = dTheta/(dTheta + (double) nT);
+      if (dRand < dImmigrate) {
+        double dSpeciate = dTheta/(dTheta + (double) nT);
 	
-	dRand = gsl_rng_uniform(ptGSLRNG);
-	if(dRand < dSpeciate){
-	  
-	  if(ptData->nS + 1 == ptData->nSize){
-	    ptData->nSize = ptData->nSize*2;
+        dRand = gsl_rng_uniform(ptGSLRNG);
+        if (dRand < dSpeciate) {
+          if (ptData->nS + 1 == ptData->nSize) {
+            ptData->nSize = ptData->nSize*2;
 	    
-	    reallocateData(ptData);
-	    
-	    anT = (int *) realloc(anT, ptData->nSize*sizeof(int));
-	    if(!anT)
-	      goto memoryError;
+            reallocateData(ptData);
+            
+            anT = (int*) realloc(anT, ptData->nSize*sizeof(int));
+            if (!anT) goto memoryError;
 
-	    for(j = ptData->nS; j < ptData->nSize; j++){
-	      anT[j] = 0;
-	    }
-	  }
+            for (j = ptData->nS; j < ptData->nSize; j++) anT[j] = 0;
+          }
 	  
-	  anT[ptData->nS] = 1;
+          anT[ptData->nS] = 1;
 
-	  ptData->aanX[i][ptData->nS] = 1;
+          ptData->aanX[i][ptData->nS] = 1;
 
-	  ptData->nS = ptData->nS + 1;
-	}
-	else{
-	  l = selectIntCat(ptGSLRNG, ptData->nS, anT);
-	  anT[l]++;
-	  ptData->aanX[i][l]++;
-	}
-	nT++;
-      }
-      else{
-	l = selectIntCat(ptGSLRNG, ptData->nS, ptData->aanX[i]);
-	ptData->aanX[i][l]++;
+          ptData->nS = ptData->nS + 1;
+        } else {
+          l = selectIntCat(ptGSLRNG, ptData->nS, anT);
+          anT[l]++;
+          ptData->aanX[i][l]++;
+        }
+        nT++;
+      } else {
+        l = selectIntCat(ptGSLRNG, ptData->nS, ptData->aanX[i]);
+        ptData->aanX[i][l]++;
       }
     }
   }
+
   *panT = anT;
+
   return;
 
  memoryError:
@@ -1248,89 +1171,71 @@ void generateDataHDP(gsl_rng* ptGSLRNG, t_Data *ptData, int nN, double dTheta, i
   exit(EXIT_FAILURE);
 }
 
-void generateDataStick(gsl_rng* ptGSLRNG, t_Data *ptData, int nN, double dTheta, int *anJ, double* adI, int nS, double *adM, int *pnSDash, double **padMDash)
+/****************************************************************************/
+
+void generateDataStick
+  (gsl_rng* ptGSLRNG, t_Data *ptData, int nN, double dTheta,
+   int *anJ, double* adI, int nS, double *adM, int *pnSDash, double **padMDash)
 {
   int    i = 0, j = 0, k = 0, n = 0, nSize = nS*10;
-  int    **aanX = (int **) malloc(nN*sizeof(int*));
+  int    **aanX = (int**) malloc(nN*sizeof(int*));
   int    nSDash = nS;
   double *adMDash = (double *) malloc(nSize*sizeof(double));
   
-  if(!adMDash)
-    goto memoryError;
+  if (! adMDash) goto memoryError;
+  for (i = 0; i < nS + 1; i++) adMDash[i] = adM[i];
 
-  for(i = 0; i < nS + 1; i++){
-    adMDash[i] = adM[i];
+  if (! aanX) goto memoryError;
+
+  for (i = 0; i < nN; i++) {
+    aanX[i] = (int*) malloc(nSize*sizeof(int));
+    if (! aanX[i]) goto memoryError;
+    for (j = 0; j < nSize; j++) aanX[i][j] = 0;
   }
 
-  if(!aanX)
-    goto memoryError;
-
-  for(i = 0; i < nN; i++){
-    aanX[i] = (int *) malloc(nSize*sizeof(int));
-
-    if(!aanX[i])
-      goto memoryError;
-
-    for(j = 0; j < nSize; j++){
-      aanX[i][j] = 0;
-    }
-  }
-
-  for(i = 0; i < nN; i++){
-    for(n = 0; n < anJ[i]; n++){
+  for (i = 0; i < nN; i++) {
+    for (n = 0; n < anJ[i]; n++) {
       double dImmigrate = adI[i]/(adI[i] + (double) n);
       double dRand = gsl_rng_uniform(ptGSLRNG);
       int    l = -1;
 
-      if(dRand < dImmigrate){
-	l = selectCat(ptGSLRNG, nSDash + 1, adMDash);
-	
-	if(l == nSDash){
-	  double dBeta = gsl_ran_beta(ptGSLRNG, 1.0, dTheta);
-	  double dOld = adMDash[nSDash];
+      if (dRand < dImmigrate) {
+        l = selectCat(ptGSLRNG, nSDash+1, adMDash);
 
-	  if(nSDash == nSize){
-	    int nOldSize = nSize;
+        if (l == nSDash) {
+          double dBeta = gsl_ran_beta(ptGSLRNG, 1.0, dTheta);
+          double dOld = adMDash[nSDash];
 
-	    nSize = nSize*2;
+          if (nSDash == nSize) {
+            int nOldSize = nSize;
+            nSize = nSize*2;
 
-	    adMDash = (double *) realloc(adM,nSize*sizeof(double));
-	    
-	    if(!adMDash)
-	      goto memoryError;
+            adMDash = (double *) realloc(adM,nSize*sizeof(double));
+            if (!adMDash) goto memoryError;
 
-	    for(j = 0; j < nN; j++){
-	      aanX[j] = (int *) realloc(aanX[i],nSize*sizeof(int));
+            for (j = 0; j < nN; j++) {
+              aanX[j] = (int*) realloc(aanX[i],nSize*sizeof(int));
+              if (!aanX[i]) goto memoryError;
 
-	      if(!aanX[i])
-		goto memoryError;
+              for (k = nOldSize; k < nSize; k++) aanX[j][k] = 0;
+            }
+          }
 
-	      for(k = nOldSize; k < nSize; k++){
-		aanX[j][k] = 0;
-	      }
-	    }
-	  }
+          adMDash[nSDash] = dBeta*dOld;
+          adMDash[nSDash + 1] = (1.0 - dBeta)*dOld;
 
-	  adMDash[nSDash] = dBeta*dOld;
-	  adMDash[nSDash + 1] = (1.0 - dBeta)*dOld;
-
-	  aanX[i][l]++;
-	  nSDash = nSDash + 1;
-	}
-	else{
-	  aanX[i][l]++;
-	}
-      }
-      else{
-	double adP[nSDash];
-
-	for(j = 0; j < nSDash; j++){
-	  adP[j] = ((double) aanX[i][j])/((double) n);
-	}
-
-	l = selectCat(ptGSLRNG, nSDash, adP);
-
-	aanX[i][l]++;
+          aanX[i][l]++;
+          nSDash = nSDash + 1;
+        } else {
+          aanX[i][l]++;
+        }
+      } else {
+        double adP[nSDash];
+        for(j = 0; j < nSDash; j++) {
+          adP[j] = ((double) aanX[i][j])/((double) n);
+        }
+        l = selectCat(ptGSLRNG, nSDash, adP);
+        aanX[i][l]++;
       }
     }
   }
@@ -1344,7 +1249,7 @@ void generateDataStick(gsl_rng* ptGSLRNG, t_Data *ptData, int nN, double dTheta,
 
   return;
 
- memoryError:
+memoryError:
   fprintf(stderr,"Failed allocating memory in generateData\n");
   fflush(stderr);
   exit(EXIT_FAILURE);
@@ -1508,23 +1413,20 @@ double calcMeanSpeciesEntropy(t_Data *ptData)
   return dMean / (double) nR;
 }
 
-double sampleTheta(gsl_rng *ptGSLRNG, double dTheta, int* anTR, int nN, int nS)
+double sampleTheta
+  (gsl_rng *ptGSLRNG, double dTheta, int* anTR, int nN, int nS)
 {
   double dTT = (double) Sum(anTR,nN);
-
-  double dPhi=gsl_ran_beta(ptGSLRNG,dTheta + 1.0, dTT);
-      
-  double dRho=gsl_ran_bernoulli(ptGSLRNG, dTT/(dTT + dTheta));
-  
+  double dPhi = gsl_ran_beta(ptGSLRNG,dTheta + 1.0, dTT);
+  double dRho = gsl_ran_bernoulli(ptGSLRNG, dTT/(dTT + dTheta));
   double dG1 = ALPHA + (double) nS - dRho;
-      
   double dG2 = BETA - log(dPhi);
-
   return gsl_ran_gamma(ptGSLRNG, dG1, 1.0/dG2);
-    
 }
 
-void sampleMetacommunity(int nIter, gsl_rng *ptGSLRNG, double *adM, double **aadMStore, double dTheta, int nS, int *anTC)
+void sampleMetacommunity
+  (int nIter, gsl_rng *ptGSLRNG, double *adM, double **aadMStore,
+   double dTheta, int nS, int *anTC)
 {
   double dMSum = 0.0;
   int i = 0;
@@ -1639,144 +1541,167 @@ void sampleT(int nIter, gsl_rng* ptGSLRNG, int** aanX, int **aanT, double** aadI
   }
 }
 
-void outputSamples(char *szOutputDir, int nIter, int nMaxIter, gsl_rng* ptGSLRNG, int nN, int nS, t_Params *ptParams, t_Data *ptData,
-		   double *adThetaStore, int *anJ, double **aadIStore, double** aadMStore)
+/****************************************************************************/
+
+void outputSamples(char *szOutputDir, int nIter, int nMaxIter, 
+                   gsl_rng* ptGSLRNG, int nN, int nS, t_Params *ptParams, 
+                   t_Data *ptData, double *adThetaStore, int *anJ, 
+                   double **aadIStore, double** aadMStore)
 {
   t_Data tTempData, tTempDataH;
+
   FILE *sfp = NULL, *mfp = NULL;
+
   char szOutFile[MAX_LINE_LENGTH];
   char szSampleFile[MAX_LINE_LENGTH];
   char szMetaFile[MAX_LINE_LENGTH];
+
   t_Data tDataR;
+
   int** aanX = ptData->aanX;
+
   int i = 0, j = 0, k = 0;
 
+  if (bVerbose == TRUE) fprintf(stderr,"Adding unobserved...");
+  addUnobserved(&tDataR, ptData);
+  if (bVerbose == TRUE) fprintf(stderr,"done.\n");
+
+  /* open files for writing */
   sprintf(szSampleFile,"%s%s",ptParams->szOutFileStub,SAMPLE_FILE_SUFFIX);
   sprintf(szMetaFile,"%s%s",ptParams->szOutFileStub,META_FILE_SUFFIX);
-
-  addUnobserved(&tDataR, ptData);
 
   sfp = fopen(szSampleFile, "w");
   mfp = fopen(szMetaFile,"w");
 
-  if(sfp && mfp){
+  if (sfp && mfp) {
     int aanF[nS][nN + 1];
     int nTotal = 0;
     double adMMean[nS];
 
-    for(i = 0; i < nS; i++){
-      for(j = 0; j <= nN; j++){
-	aanF[i][j] = 0;
-      }
+    for (i = 0; i < nS; i++) {
+      for (j = 0; j <= nN; j++) aanF[i][j] = 0;
       adMMean[i] = 0.0;
     }
 
-    for(i = ptParams->nBurnIter; i < nMaxIter; i++){
-      if(i % N_SAMPLE == 0){
-	int nSDash = 0, anF[nS];
-	double dHS = 0.0, dHH = 0.0, dHR = 0.0, dHF = 0.0, dNLLS = 0.0, dNLLR = 0.0, dNLLH = 0.0, dNLLF = 0.0;
-	double *adMDash = NULL;
-	double *adMH = NULL;
-	int    *anT = NULL;
-	char   szStickSampleFile[MAX_LINE_LENGTH];
+    for (i = ptParams->nBurnIter; i < nMaxIter; i++) {
+      if (i % N_SAMPLE == 0) {
+        int nSDash = 0, anF[nS];
+        double dHS = 0.0, dHH = 0.0, dHR = 0.0, dHF = 0.0;
+        double dNLLS = 0.0, dNLLR = 0.0, dNLLH = 0.0, dNLLF = 0.0;
+        double *adMDash = NULL;
+        double *adMH = NULL;
+        int    *anT = NULL;
+        char   szStickSampleFile[MAX_LINE_LENGTH];
 	
-	generateDataStick(ptGSLRNG, &tTempData, nN, adThetaStore[i], anJ, aadIStore[i], nS, aadMStore[i], &nSDash, &adMDash);
+        if (bVerbose == TRUE) fprintf(stderr,"[%d] Generating stick data...",i);
+        generateDataStick(ptGSLRNG, &tTempData, nN, adThetaStore[i], anJ, 
+                          aadIStore[i], nS, aadMStore[i], &nSDash, &adMDash);
+        if (bVerbose == TRUE) fprintf(stderr,"done.\n",i);
 
-	tTempData.aszOTUNames = (char **) malloc(tTempData.nS*sizeof(char*));
-	for(j = 0; j < ptData->nS; j++){
-	  tTempData.aszOTUNames[j] = strdup(ptData->aszOTUNames[j]);
-	}
-	for(j = ptData->nS; j < tTempData.nS;j++){
-	  char*szTemp = malloc(MAX_LINE_LENGTH*sizeof(char));
+        tTempData.aszOTUNames = (char**) malloc(tTempData.nS*sizeof(char*));
+        for (j = 0; j < ptData->nS; j++) {
+          tTempData.aszOTUNames[j] = strdup(ptData->aszOTUNames[j]);
+        }
 
-	  sprintf(szTemp,"D%d",j);
-	  tTempData.aszOTUNames[j] = szTemp; 
-	}
+        for (j = ptData->nS; j < tTempData.nS;j++) {
+          char *szTemp = malloc(MAX_LINE_LENGTH*sizeof(char));
+          sprintf(szTemp,"D%d",j);
+          tTempData.aszOTUNames[j] = szTemp; 
+        }
 
-	/*output sampled file*/
-	if(ptParams->bOutputSample){
-	  sprintf(szStickSampleFile,"%s/%s%d%s",szOutputDir,ptParams->szOutFileStub,i,CSV_FILE_SUFFIX);
-	
-	  tTempData.aszSampleNames = ptData->aszSampleNames;
-	
-	  writeAbundanceData(szStickSampleFile, &tTempData);
-	}
+        /* output sampled file */
 
-	generateDataHDP(ptGSLRNG, &tTempDataH, nN, adThetaStore[i], anJ, aadIStore[i], &anT);
+        if (ptParams->bOutputSample) {
+          sprintf(szStickSampleFile,"%s/%s%d%s",szOutputDir,ptParams->szOutFileStub,i,CSV_FILE_SUFFIX);
+          if (bVerbose == TRUE) fprintf(stderr,"[%d] Output sample: %s\n",i,szStickSampleFile);
+          tTempData.aszSampleNames = ptData->aszSampleNames;
+          writeAbundanceData(szStickSampleFile, &tTempData);
+        }
 
-	adMH = (double *) malloc(sizeof(double)*(tTempDataH.nS + 1));
+        if (bVerbose == TRUE) {
+          fprintf(stderr,"[%d] Generate HPD.\n",i);
+          fprintf(stderr,"  %f\n",adThetaStore[i]);
+          fprintf(stderr,"  %f\n",aadIStore[i][0]);
+        }
 
-	if(bVerbose == TRUE){
-	  printf("Sampling %d:\n",i);
-	}
+        generateDataHDP(ptGSLRNG, &tTempDataH, nN, adThetaStore[i],
+                        anJ, aadIStore[i], &anT);
+
+        adMH = (double *) malloc(sizeof(double)*(tTempDataH.nS + 1));
+
+        if (bVerbose == TRUE) {
+          fprintf(stderr,"Sampling: %8d/%d (%6.2f%%)\n",
+                  i,nMaxIter,100.0*i/(nMaxIter-ptParams->nBurnIter+1));
+          fflush(stderr);
+        }
      
-	sampleMetacommunityHDP(ptGSLRNG, adMH, adThetaStore[i], tTempDataH.nS, anT);
+        sampleMetacommunityHDP(ptGSLRNG, adMH, adThetaStore[i], tTempDataH.nS,anT);
 
-	dNLLS = calcNLLikelihood(&tTempData, adThetaStore[i], aadIStore[i], adMDash);
-	dNLLR = calcNLLikelihood(&tDataR, adThetaStore[i], aadIStore[i], aadMStore[i]);
-	dNLLH = calcNLLikelihood(&tTempDataH, adThetaStore[i], aadIStore[i],adMH);
+        dNLLS = calcNLLikelihood(&tTempData, adThetaStore[i], aadIStore[i],adMDash);
+        dNLLR = calcNLLikelihood(&tDataR, adThetaStore[i], aadIStore[i], aadMStore[i]);
+        dNLLH = calcNLLikelihood(&tTempDataH, adThetaStore[i], aadIStore[i],adMH);
 
-	dHS = calcMeanSpeciesEntropy(&tTempData);
-	dHR = calcMeanSpeciesEntropy(&tDataR);
-	dHH = calcMeanSpeciesEntropy(&tTempDataH);
+        dHS = calcMeanSpeciesEntropy(&tTempData);
+        dHR = calcMeanSpeciesEntropy(&tDataR);
+        dHH = calcMeanSpeciesEntropy(&tTempDataH);
 
-	fprintf(sfp,"%d,%f,%f,%f,%f,%f,%f,%d,%d,%d\n",i,dNLLH,dNLLS,dNLLR,dHH,dHS,dHR,calcR(&tTempDataH),calcR(&tTempData),calcR(&tDataR));
+        fprintf(sfp,"%d,%f,%f,%f,%f,%f,%f,%d,%d,%d\n",i,dNLLH,dNLLS,dNLLR,dHH,dHS,dHR,calcR(&tTempDataH),calcR(&tTempData),calcR(&tDataR));
 
-	fprintf(mfp,"%d,%d,%d\n",i,nS,tTempDataH.nS);
-	for(j = 0; j < nS; j++){
-	  fprintf(mfp,"%f,",aadMStore[i][j]);
-	}
-	fprintf(mfp,"%f\n",aadMStore[i][nS]);
-	
-	for(j = 0; j < tTempDataH.nS; j++){
-	  fprintf(mfp,"%f,",adMH[j]);
-	}
-	fprintf(mfp,"%f\n",adMH[tTempDataH.nS]);
+        fprintf(mfp,"%d,%d,%d\n",i,nS,tTempDataH.nS);
+        for (j = 0; j < nS; j++) {
+          fprintf(mfp,"%f,",aadMStore[i][j]);
+        }
+        fprintf(mfp,"%f\n",aadMStore[i][nS]);
+        
+        for (j = 0; j < tTempDataH.nS; j++) {
+          fprintf(mfp,"%f,",adMH[j]);
+        }
+        fprintf(mfp,"%f\n",adMH[tTempDataH.nS]);
 
-	for(j = 0; j < nS; j++){
-	  adMMean[j] += aadMStore[i][j];
+        for (j = 0; j < nS; j++) {
+          adMMean[j] += aadMStore[i][j];
 
-	  anF[j] = 0;
-	  for(k = 0; k < nN; k++){
-	    if(tTempData.aanX[k][j] > 0){
-	      anF[j]++;
-	    }
-	  }
+          anF[j] = 0;
+          for (k = 0; k < nN; k++) {
+            if (tTempData.aanX[k][j] > 0) anF[j]++;
+          }
 
-	  aanF[j][anF[j]]++;
-	}
-	nTotal++;
-	for(j = 0; j < nN; j++){
-	  free(tTempData.aanX[j]);
-	  free(tTempDataH.aanX[j]);
-	}
-	for(j = 0; j < tTempData.nS; j++){
-	  free(tTempData.aszOTUNames[j]);
-	}
-	free(tTempData.aszOTUNames);
+          aanF[j][anF[j]]++;
+        }
 
-	free(tTempData.aanX);
-	free(tTempDataH.aanX);
-	free(adMDash);
-	free(adMH);
-	free(anT);
-     }
-   }
+        nTotal++;
+        for (j = 0; j < nN; j++) {
+          free(tTempData.aanX[j]);
+          free(tTempDataH.aanX[j]);
+        }
+
+        for (j = 0; j < tTempData.nS; j++) {
+          free(tTempData.aszOTUNames[j]);
+        }
+
+        free(tTempData.aszOTUNames);
+
+        free(tTempData.aanX);
+        free(tTempDataH.aanX);
+        free(adMDash);
+        free(adMH);
+        free(anT);
+      }
+    }
    
-   fclose(mfp);
-   fclose(sfp);
- }
- else{
-   fprintf(stderr, "Failed to open %s for writing\n",szOutFile);
-   fflush(stderr);
- }
+    fclose(mfp);
+    fclose(sfp);
+  } else {
+    fprintf(stderr, "Failed to open %s for writing\n",szOutFile);
+    fflush(stderr);
+  }
 
- for(i = 0; i < nN; i++){
-   free(tDataR.aanX[i]);
- }
- free(tDataR.aanX);
+  for (i = 0; i < nN; i++) {
+    free(tDataR.aanX[i]);
+  }
+  free(tDataR.aanX);
 
- return;
+  return;
 }
 
 void extrapolateSamples2(char *szOutputDir, int nIter, int nMaxIter, gsl_rng* ptGSLRNG, int nE, int nN, int nS, t_Params *ptParams, t_Data *ptData,
@@ -2007,8 +1932,100 @@ void rarefy(gsl_rng *ptGSLRNG,int nMaxJ, t_Data *ptDataR, t_Data *ptData)
   }
   free(aanX);
   return;
- memoryError:
+
+memoryError:
   fprintf(stderr,"Failed allocating memory in rarefy\n");
   fflush(stderr);
   exit(EXIT_FAILURE);
 }
+
+/****************************************************************************/
+
+void writeTheta(const t_Params *ptParams, 
+                int nMaxIter, int nN,
+                const double* adThetaStore,
+                double** aadIStore) 
+{
+  /* write all sampled theta to output file */
+  int i, j;
+  FILE *ofp = NULL;
+  char szOutFile[MAX_LINE_LENGTH];
+  sprintf(szOutFile,"%s%s",ptParams->szOutFileStub,CSV_FILE_SUFFIX);
+  
+  ofp = fopen(szOutFile, "w");
+
+  if (ofp) {
+    for (i = 0; i < nMaxIter; i++) {
+      fprintf(ofp,"%d,%f,",i,adThetaStore[i]);
+      for (j = 0; j < nN-1; j++) fprintf(ofp,"%f,",aadIStore[i][j]);
+      fprintf(ofp,"%f\n",aadIStore[i][nN-1]);
+    }
+    fclose(ofp);
+  } else {
+    fprintf(stderr, "Failed to open %s for writing\n",szOutFile);
+    fflush(stderr);
+  }
+}
+
+/****************************************************************************/
+
+void readTheta(const t_Params *ptParams, int nMaxIter, int nN,
+               double* adThetaStore, double** aadIStore) 
+{
+  int i = 0, j = 0, line = 0;
+
+  char szLine[MAX_LINE_LENGTH];
+  FILE* ifp = NULL;
+
+  char szOutFile[MAX_LINE_LENGTH];
+  sprintf(szOutFile,"%s%s",ptParams->szOutFileStub,CSV_FILE_SUFFIX);
+ 
+  ifp = fopen(szOutFile, "r");
+
+  char* szTok   = NULL;
+  char* pcError = NULL;
+
+  if (ifp) {
+    /* get the first line */
+    fgets(szLine, MAX_LINE_LENGTH, ifp);
+    ++line;
+
+    szTok = strtok(szLine, DELIM);
+    int iter = strtol(szTok,&pcError,10);
+    if (*pcError != '\0') goto formatError;
+
+    if (iter > 0 && iter < nMaxIter) {
+      szTok = strtok(NULL, DELIM);
+      adThetaStore[iter] = strtod(szTok,&pcError);
+      if (*pcError != '\0') goto formatError;
+
+      printf("%s %f\n",szTok,adThetaStore[iter]);
+
+      for (i = 0; i < nN; i++) {
+        szTok = strtok(NULL, DELIM);
+        aadIStore[iter][i] = strtod(szTok,&pcError);
+      }
+	
+      fgets(szLine, MAX_LINE_LENGTH, ifp);
+      ++line;
+ 
+      if (*pcError != '\0') goto formatError;
+    }
+  } else {
+    fprintf(stderr, "Failed to open theta data file %s aborting\n", szOutFile);
+    fflush(stderr);
+    exit(EXIT_FAILURE);
+  }
+
+  return;
+
+formatError:
+  fprintf(stderr, "Incorrectly formatted theta data file\n");
+  fprintf(stderr, "[Line %d] %s\n",line,szLine);
+  fprintf(stderr, "[Line %d] %s\n",line,szTok);
+  fprintf(stderr, "[Line %d] %s\n",line,pcError);
+  fflush(stderr);
+  exit(EXIT_FAILURE);
+}
+
+

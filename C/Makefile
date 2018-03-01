@@ -1,8 +1,8 @@
-CC     = gcc
-CFLAGS = -O3
-EFLAGS =  
+CC     = gcc-7
+CFLAGS = -isystem /usr/local/include -O3 -fopenmp
+EFLAGS = -fopenmp
 EFILE  = NMGS
-LIBS   = -lm -lgsl -lgslcblas
+LIBS   = -L/usr/local/lib -lm -lgsl -framework Accelerate
 OBJS   = NMGS.o 
 
 $(EFILE) : $(OBJS)

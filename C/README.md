@@ -48,8 +48,10 @@ Simulation_out_s.csv: Gives statistics on the sampled communities in format:
 
 SampleN,LN,LL,LO,HN,HL,HO,SN,SL,SO
 
-where SampleN is nth sample generated under the neutral model with fitted parameters taken from the corresponding MCMC sample. LN,LL,LO are the log-likelihoods of the full neutral sample, the local community sample and the observed sample respectively. Then HN,HL,HO and SN,SL,SO are the species entropies and richness's in the same order.
-
+where
+  - SampleN is nth sample generated under the neutral model with fitted parameters taken from the corresponding MCMC sample.
+  - LN,LL,LO are the log-likelihoods of the full neutral sample, the local community sample and the observed sample respectively.
+  - Then HN,HL,HO and SN,SL,SO are the species entropies and richness's in the same order.
 
 ## Analyzing the output
 

@@ -15,7 +15,7 @@
 
 #define OUT_FILE_STUB    "-out"
 #define INPUT_FILE       "-in"
-#define SEED       	 "-l"
+#define SEED       	     "-l"
 #define VERBOSE          "-v"
 #define N_ITERATIONS     "-t"
 #define RAREFY           "-r"
@@ -23,6 +23,7 @@
 #define EXTRAPOLATE      "-e"
 #define OUTPUT_SAMPLE    "-o"
 #define N_BURN_ITER      "-b"
+#define SAMPLE_ONLY      "-S"
 
 #define CSV_FILE_SUFFIX         ".csv"
 #define FREQ_FILE_SUFFIX        "_f.csv"
@@ -46,42 +47,29 @@
 
 typedef struct s_Params
 {	
-  /*no. of iterations*/
-  int nMaxIter;
-  /* no. of burn-in iterations*/
-  int nBurnIter;
-  /*seed*/
-  int nL;
-  /*csv input file*/
-  char *szInputFile;
-  /*output file stub*/
-  char *szOutFileStub;
-  /*resample for fitting purposes*/
-  int bSample;
-  /*extrapolate to new sample size*/
-  int nExtrapolate;
-  /*output samples*/
-  int bOutputSample;
-  /*rarefy sample to lowest sample size*/
-  int nRarefy;
+  int nMaxIter;        /* no. of iterations */
+  int nBurnIter;       /* no. of burn-in iterations */
+  int nL;              /* seed */
+  char *szInputFile;   /* csv input file */
+  char *szOutFileStub; /* output file stub */
+  int bSample;         /* resample for fitting purposes */
+  int nExtrapolate;    /* extrapolate to new sample size */
+  int bOutputSample;   /* output samples */
+  int nRarefy;         /* rarefy sample to lowest sample size */
+  int bSampleOnly;     /* skip Gibbs sampling step */
 } t_Params;
 
 typedef struct s_Data
 {
   int nN;
-
   int nS;
-
   int nSize;
-
   int **aanX;
-
   char **aszSampleNames;
-
   char **aszOTUNames;
 } t_Data;
 
-/*User defined functions*/
+/* User defined functions */
 
 void getCommandLineParams(t_Params *ptParams,int argc,char *argv[]);
 
@@ -146,5 +134,10 @@ void rarefy(gsl_rng *ptGSLRNG,int nMaxJ, t_Data *ptDataR, t_Data *ptData);
 void extrapolateDataHDP(gsl_rng* ptGSLRNG, t_Data *ptData, int nN, int nE, double dTheta, double* adI, int* anTSample);
 
 void copyData(t_Data* ptDataR, t_Data *ptData);
+
+void writeTheta(const t_Params *ptParams, int nMaxIter, int nN, 
+                const double* adThetaStore, double** aadIStore);
+void readTheta(const t_Params *ptParams, int nMaxIter, int nN, 
+               double* adThetaStore, double** aadIStore);
 
 #endif

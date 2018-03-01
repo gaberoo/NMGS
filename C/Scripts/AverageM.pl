@@ -1,4 +1,4 @@
-#!/opt/local/bin/perl
+#!/usr/bin/env perl
 
 my @vals1 = ();
 my @vals2 = ();
