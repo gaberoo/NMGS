@@ -1,6 +1,6 @@
 CC     = gcc-7
-CFLAGS = -isystem /usr/local/include -O3 -fopenmp
-EFLAGS = -fopenmp
+CFLAGS = -g -isystem /usr/local/include -O3 -fopenmp
+EFLAGS = -g -fopenmp
 EFILE  = NMGS
 LIBS   = -L/usr/local/lib -lm -lgsl -framework Accelerate
 OBJS   = NMGS.o 

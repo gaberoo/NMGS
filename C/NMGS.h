@@ -24,6 +24,8 @@
 #define OUTPUT_SAMPLE    "-o"
 #define N_BURN_ITER      "-b"
 #define SAMPLE_ONLY      "-S"
+#define SAVE_STIRLING    "-saveS"
+#define READ_STIRLING    "-readS"
 
 #define CSV_FILE_SUFFIX         ".csv"
 #define FREQ_FILE_SUFFIX        "_f.csv"
@@ -57,6 +59,8 @@ typedef struct s_Params
   int bOutputSample;   /* output samples */
   int nRarefy;         /* rarefy sample to lowest sample size */
   int bSampleOnly;     /* skip Gibbs sampling step */
+  int bSaveStirling;   /* save Stirling matrix */
+  int bReadStirling;   /* read Stirling matrix */
 } t_Params;
 
 typedef struct s_Data
@@ -91,15 +95,18 @@ void generateData(gsl_rng* ptGSLRNG, t_Data *ptData, int nN, double dTheta, int 
 
 double calcNLLikelihood(t_Data *ptData, double dTheta, double* adI, double *adM);
 
-void addUnobserved(t_Data* ptDataR, t_Data *ptData);
+void addUnobserved(t_Data* ptDataR, const t_Data *ptData);
 
-void generateDataStick(gsl_rng* ptGSLRNG, t_Data *ptData, int nN, double dTheta, int *anJ, double* adI, int nS, double *adM, int *pnSDash, double **padMDash);
+void generateDataStick(gsl_rng* ptGSLRNG, t_Data *ptData, int nN, double dTheta, 
+                       const int *anJ, const double* adI, int nS, 
+                       const double *adM, 
+                       int *pnSDash, double **padMDash);
 
 double calcMeanSpeciesEntropy(t_Data *ptData);
 
 int calcR(t_Data *ptData);
 
-int selectIntCat(gsl_rng* ptGSLRNG, int nN, int* anN);
+int selectIntCat(gsl_rng* ptGSLRNG, int nN, const int* anN);
 
 void generateDataHDP(gsl_rng* ptGSLRNG, t_Data *ptData, int nN, double dTheta, int *anJ, double* adI, int **panT);
 
@@ -118,8 +125,10 @@ void sampleImmigrationRates(int nIter, gsl_rng *ptGSLRNG, double **aadIStore, in
 void sampleT(int nIter, gsl_rng* ptGSLRNG, int** aanX, int **aanT, double** aadIStore, double** aadMStore, 
 	     double** aadStirlingMatrix, int nN, int nS, double *adLogProbV, double *adProbV, double *adCProbV);
 
-void outputSamples(char *szOutputDir,int nIter, int nMaxIter, gsl_rng* ptGSLRNG, int nN, int nS, t_Params *ptParams, t_Data *ptData,
-		   double *adThetaStore, int *anJ, double **aadIStore, double** aadMStore);
+void outputSamples(char *szOutputDir,int nIter, int nMaxIter, 
+                   gsl_rng* ptGSLRNG, int nN, int nS, 
+                   const t_Params *ptParams, const t_Data *ptData,
+                   double *adThetaStore, int *anJ, double **aadIStore, double** aadMStore);
 
 void extrapolateSamples(int nIter, int nMaxIter, gsl_rng* ptGSLRNG, int nN, int nS, t_Params *ptParams, t_Data *ptData,
 			double *adThetaStore, int *anJ, double **aadIStore, double** aadMStore);
@@ -139,5 +148,8 @@ void writeTheta(const t_Params *ptParams, int nMaxIter, int nN,
                 const double* adThetaStore, double** aadIStore);
 void readTheta(const t_Params *ptParams, int nMaxIter, int nN, 
                double* adThetaStore, double** aadIStore);
+
+void readStirling(double ***paadStirlingMatrix, double** padNormMatrix, unsigned long n);
+void writeStirling(double** aadStirlingMatrix, double* adNormMatrix, unsigned long n);
 
 #endif

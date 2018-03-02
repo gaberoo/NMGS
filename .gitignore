@@ -1,3 +1,6 @@
 C/*.o
 *.tar.gz
 
+*.dSYM
+*.trace
+
